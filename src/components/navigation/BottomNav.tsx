@@ -33,7 +33,7 @@ export const BottomNav: React.FC = () => {
   };
 
   return (
-    <Box sx={{ display: { xs: "block", md: "none" }, position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 1000 }}>
+    <Box sx={{ display: { xs: "block", sm: "none" }, position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 1000 }}>
       <Paper elevation={3} sx={{ borderRadius: "16px 16px 0 0", borderTop: "1px solid rgba(255, 255, 255, 0.08)", overflow: "hidden" }}>
         <BottomNavigation
           value={getIndex()}

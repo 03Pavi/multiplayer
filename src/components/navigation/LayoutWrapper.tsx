@@ -15,12 +15,13 @@ export interface LayoutWrapperProps {
 export const LayoutWrapper: React.FC<LayoutWrapperProps> = ({ children }) => {
   const { pathname } = useAppNavigation();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  // Sidebar visible on anything > 600px (sm). Only true phones hide it.
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
 
   // Paths that do NOT show the sidebar or bottom navigation
   const noNavPaths = ["/", "/login", "/register", "/forgot-password", "/reset-password", "/email-verification"];
-  const isNavHidden = noNavPaths.includes(pathname || "") || !isAuthenticated;
+  const isNavHidden = noNavPaths.includes(pathname || "");
 
   if (isNavHidden) {
     return <Box sx={{ minHeight: "100vh", backgroundColor: "#0B0F14" }}>{children}</Box>;
@@ -28,10 +29,10 @@ export const LayoutWrapper: React.FC<LayoutWrapperProps> = ({ children }) => {
 
   return (
     <Box sx={{ minHeight: "100vh", backgroundColor: "#0B0F14", display: "flex" }}>
-      {/* Left Sidebar on Desktop */}
+      {/* Sidebar — always visible on sm+ (tablets & desktops) */}
       {!isMobile && <Sidebar />}
 
-      {/* Top Header on Mobile */}
+      {/* Top Header — only on true mobile phones */}
       {isMobile && <MobileHeader />}
 
       {/* Main Content Area */}
@@ -40,10 +41,11 @@ export const LayoutWrapper: React.FC<LayoutWrapperProps> = ({ children }) => {
         sx={{
           flexGrow: 1,
           minHeight: "100vh",
-          pl: !isMobile ? "260px" : 0,
-          pt: isMobile ? "60px" : 0,  // clearance for fixed mobile header
-          pb: isMobile ? "70px" : 0,  // clearance for bottom nav
+          pl: !isMobile ? "260px" : 0,   // offset for fixed sidebar
+          pt: isMobile ? "60px" : 0,      // offset for mobile top bar
+          pb: isMobile ? "70px" : 0,      // offset for bottom nav
           width: "100%",
+          overflowX: "hidden",
           display: "flex",
           flexDirection: "column",
         }}
@@ -51,7 +53,7 @@ export const LayoutWrapper: React.FC<LayoutWrapperProps> = ({ children }) => {
         {children}
       </Box>
 
-      {/* Bottom Nav on Mobile */}
+      {/* Bottom Nav — only on true mobile phones */}
       {isMobile && <BottomNav />}
     </Box>
   );

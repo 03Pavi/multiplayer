@@ -69,6 +69,10 @@ export default function DashboardPage() {
       navigate(`/room/${room.code}`);
     });
 
+    socketManager.on("connection_error", (err: { message: string }) => {
+      alert(err.message || "Failed to connect to the room. The host may be offline.");
+    });
+
     return () => {
       unsubscribeRooms();
       unsubscribeArenas();
@@ -76,6 +80,7 @@ export default function DashboardPage() {
       if (user) dbService.clearPresence(user.id);
       socketManager.off("room_created", () => {});
       socketManager.off("room_joined", () => {});
+      socketManager.off("connection_error", () => {});
     };
   }, [dispatch, navigate, user]);
 
@@ -97,11 +102,18 @@ export default function DashboardPage() {
       user,
     });
   };
+  const allGames = Object.values(GAMES_CONFIG);
+  const [showAllGames, setShowAllGames] = useState(false);
 
-  const trendingGames = Object.values(GAMES_CONFIG).slice(0, 5);
+  const getGameCardPlayersLabel = (gameId: string, min: number, max: number) => {
+    const livePlayers = publicRooms
+      .filter((r) => r.gameType === gameId && r.status !== "ended")
+      .reduce((sum, r) => sum + (r.players?.length || 0), 0);
+    return livePlayers > 0 ? `${livePlayers} Live` : `${min}-${max}`;
+  };
 
   return (
-    <Box sx={{ py: 4, px: { xs: 2, md: 4 }, minHeight: "100vh" }}>
+    <Box sx={{ py: 4, px: { xs: 2, sm: 3 }, minHeight: "100vh" }}>
       <Container maxWidth="xl">
         {/* Welcome HUD Header */}
         <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 2.5, justifyContent: "space-between", alignItems: { xs: "stretch", sm: "center" } }} mb={4}>
@@ -189,6 +201,12 @@ export default function DashboardPage() {
                       maxPlayers={room.maxPlayers}
                       isPrivate={room.isPrivate}
                       gameType={room.gameType || "Lobby"}
+                      isOwner={user ? room.hostId === user.id : false}
+                      onDelete={async () => {
+                        if (confirm(`Delete room "${room.name}" (${room.code})?`)) {
+                          await dbService.deleteRoom(room.code);
+                        }
+                      }}
                       onJoin={() => {
                         if (user) {
                           socketManager.emit("join_room", { roomCode: room.code, user });
@@ -206,34 +224,125 @@ export default function DashboardPage() {
               )}
             </Stack>
 
-            {/* Trending Games Carousel */}
-            <Typography variant="h5" fontWeight={800} mb={2}>
-              TRENDING GAME MODULES
-            </Typography>
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-              {trendingGames.map((game, idx) => {
-                const isLarge = idx === 0;
-                const widthStyle = isLarge 
-                  ? { xs: "100%", md: "calc(66.7% - 16px)" } 
-                  : { xs: "100%", sm: "calc(50% - 12px)", md: "calc(33.3% - 16px)" };
+            {/* Trending Games — 2 per row + More card */}
+            <Box>
+              <Typography variant="h5" fontWeight={800} mb={2}>
+                TRENDING GAME MODULES
+              </Typography>
 
-                return (
-                  <Box key={game.id} sx={{ ...widthStyle, boxSizing: "border-box", display: "flex" }}>
+              {/* Single flex container for seamless wrapping layout */}
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3, mb: showAllGames ? 1 : 4 }}>
+                {allGames.slice(0, 3).map((game) => (
+                  <Box
+                    key={game.id}
+                    sx={{ width: { xs: "100%", sm: "calc(50% - 12px)" }, boxSizing: "border-box", display: "flex" }}
+                  >
                     <GameCard
                       id={game.id}
                       title={game.title}
                       description={game.description}
                       icon={game.emoji}
-                      playersCount={`${game.minPlayers}-${game.maxPlayers}`}
+                      playersCount={getGameCardPlayersLabel(game.id, game.minPlayers, game.maxPlayers)}
                       duration={`${game.rounds} Rounds`}
                       difficulty={game.difficulty}
                       onSelect={() => setCreateDialogOpen(true)}
                       ctaText="Host Game"
-                      layout={isLarge ? "horizontal" : "vertical"}
                     />
                   </Box>
-                );
-              })}
+                ))}
+
+                {/* 4th slot — "More" card */}
+                {!showAllGames && (
+                  <Box
+                    sx={{ width: { xs: "100%", sm: "calc(50% - 12px)" }, boxSizing: "border-box", display: "flex" }}
+                    onClick={() => setShowAllGames(true)}
+                  >
+                    <Box
+                      sx={{
+                        width: "100%",
+                        minHeight: "260px",
+                        borderRadius: "16px",
+                        border: "2px dashed rgba(255,255,255,0.12)",
+                        backgroundColor: "rgba(255,255,255,0.02)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        gap: 1.5,
+                        transition: "all 0.2s ease",
+                        "&:hover": {
+                          borderColor: "#22C55E",
+                          backgroundColor: "rgba(34,197,94,0.05)",
+                          transform: "translateY(-2px)",
+                        },
+                      }}
+                    >
+                      <Typography sx={{ fontSize: "2.5rem" }}>🎮</Typography>
+                      <Typography variant="h6" fontWeight={900} sx={{ color: "#FFFFFF" }}>
+                        +{allGames.length - 3} More
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: "#9CA3AF", textAlign: "center", px: 2 }}>
+                        {allGames.slice(3).map(g => g.title).join(" · ")}
+                      </Typography>
+                      <Box sx={{ mt: 1, px: 2.5, py: 0.75, borderRadius: "8px", backgroundColor: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)" }}>
+                        <Typography variant="caption" sx={{ color: "#22C55E", fontWeight: 800 }}>
+                          SEE ALL GAMES
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Expanded: remaining games — rendered in the same flex list container */}
+                {showAllGames &&
+                  allGames.slice(3).map((game) => (
+                    <Box
+                      key={game.id}
+                      sx={{
+                        width: { xs: "100%", sm: "calc(50% - 12px)" },
+                        boxSizing: "border-box",
+                        display: "flex",
+                        animation: "fadeIn 0.3s ease",
+                      }}
+                    >
+                      <GameCard
+                        id={game.id}
+                        title={game.title}
+                        description={game.description}
+                        icon={game.emoji}
+                        playersCount={getGameCardPlayersLabel(game.id, game.minPlayers, game.maxPlayers)}
+                        duration={`${game.rounds} Rounds`}
+                        difficulty={game.difficulty}
+                        onSelect={() => setCreateDialogOpen(true)}
+                        ctaText="Host Game"
+                      />
+                    </Box>
+                  ))}
+              </Box>
+
+              {/* Show Less button below the single container flow */}
+              {showAllGames && (
+                <Box sx={{ width: "100%", display: "flex", justifyContent: "center", pt: 1, mb: 4 }}>
+                  <Box
+                    onClick={() => setShowAllGames(false)}
+                    sx={{
+                      cursor: "pointer",
+                      color: "#9CA3AF",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      px: 3,
+                      py: 1,
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      transition: "all 0.2s",
+                      "&:hover": { color: "#FFFFFF", borderColor: "rgba(255,255,255,0.2)" },
+                    }}
+                  >
+                    ▲ Show Less
+                  </Box>
+                </Box>
+              )}
             </Box>
             </Box>
 
@@ -273,30 +382,7 @@ export default function DashboardPage() {
               </Card>
             )}
 
-            {/* Dynamic Recent Arenas Panel */}
-            <Card sx={{ p: 3, mb: 4 }}>
-              <Typography variant="subtitle1" fontWeight={800} mb={3} display="flex" alignItems="center" gap={1}>
-                <HistoryIcon sx={{ color: "#22C55E" }} />
-                RECENT PUBLIC MATCHES
-              </Typography>
-              <Stack spacing={2}>
-                {recentArenas.length > 0 ? (
-                  recentArenas.slice(0, 4).map((arena: any) => (
-                    <Box key={arena.id} display="flex" justifyContent="space-between" alignItems="center" p={1.5} sx={{ backgroundColor: "rgba(255,255,255,0.01)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
-                      <Box>
-                        <Typography variant="body2" fontWeight={750}>{arena.game}</Typography>
-                        <Typography variant="caption" sx={{ color: "#9CA3AF" }}>{arena.date}</Typography>
-                      </Box>
-                      <Typography variant="subtitle2" color="#22C55E">{arena.xpEarned}</Typography>
-                    </Box>
-                  ))
-                ) : (
-                  <Typography variant="caption" sx={{ color: "#9CA3AF", fontStyle: "italic" }}>
-                    No recent dynamic arenas complete. Start a game to record logs!
-                  </Typography>
-                )}
-              </Stack>
-            </Card>
+
 
             {/* Online Squad */}
             <Card sx={{ p: 3 }}>

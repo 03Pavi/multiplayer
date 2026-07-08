@@ -10,9 +10,20 @@ export interface AuthState {
 }
 
 const initialState: AuthState = {
-  user: null,
-  token: null,
-  isAuthenticated: false,
+  user: {
+    id: "guest-soldier-1",
+    name: "Alpha Player",
+    avatar: "🦊",
+    level: 5,
+    xp: 1200,
+    rank: "Gold",
+    bio: "Pioneering the PartyVerse AI Sandbox!",
+    wins: 12,
+    gamesPlayed: 20,
+    badges: ["First Recruit", "Alpha Tester"],
+  },
+  token: "guest-token-xyz",
+  isAuthenticated: true,
   loading: false,
   error: null,
 };

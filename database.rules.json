@@ -1,0 +1,63 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "rooms": {
+      ".read": "auth != null",
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['id', 'code', 'name', 'maxPlayers', 'status', 'hostId', 'createdAt'])",
+
+        "players": {
+          "$playerId": {
+            ".write": "auth != null && (auth.uid === $playerId || data.parent().parent().child('hostId').val() === auth.uid)"
+          }
+        }
+      }
+    },
+
+    "messages": {
+      "$code": {
+        ".read": "auth != null",
+        "$messageId": {
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['content', 'senderId', 'senderName', 'timestamp'])"
+        }
+      }
+    },
+
+    "leaderboard": {
+      ".read": true,
+      "$userId": {
+        ".write": "auth != null && auth.uid === $userId",
+        ".validate": "newData.hasChildren(['id', 'name', 'xp', 'level', 'rank'])"
+      }
+    },
+
+    "recent_arenas": {
+      ".read": "auth != null",
+      "$arenaId": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['id', 'game', 'xpEarned'])"
+      }
+    },
+
+    "presence": {
+      ".read": "auth != null",
+      "$userId": {
+        ".write": "auth != null && auth.uid === $userId",
+        ".validate": "newData.hasChildren(['id', 'name', 'online', 'lastSeen'])"
+      }
+    },
+
+    "game_sessions": {
+      ".read": "auth != null",
+      "$sessionId": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['id', 'roomCode', 'gameType', 'startedAt'])"
+      }
+    }
+  }
+}

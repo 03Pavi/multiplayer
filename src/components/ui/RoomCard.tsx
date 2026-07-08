@@ -1,12 +1,13 @@
 "use client";
 
 import React from "react";
-import { Box, Typography, Chip } from "@mui/material";
+import { Box, Typography, Chip, IconButton, Tooltip } from "@mui/material";
 import Card from "./Card";
 import Button from "./Button";
 import PeopleIcon from "@mui/icons-material/People";
 import LockIcon from "@mui/icons-material/Lock";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 
 export interface RoomCardProps {
   id: string;
@@ -18,6 +19,8 @@ export interface RoomCardProps {
   isPrivate: boolean;
   gameType?: string;
   onJoin?: () => void;
+  onDelete?: () => void;
+  isOwner?: boolean;
 }
 
 export const RoomCard: React.FC<RoomCardProps> = ({
@@ -29,6 +32,8 @@ export const RoomCard: React.FC<RoomCardProps> = ({
   isPrivate,
   gameType = "Lobby",
   onJoin,
+  onDelete,
+  isOwner,
 }) => {
   return (
     <Card
@@ -79,23 +84,48 @@ export const RoomCard: React.FC<RoomCardProps> = ({
         </Box>
       </Box>
 
-      {onJoin && (
-        <Button
-          variant="contained"
-          color="secondary"
-          onClick={onJoin}
-          sx={{
-            minHeight: "40px",
-            px: 3,
-            fontSize: "0.85rem",
-            fontWeight: 700,
-          }}
-        >
-          Join
-        </Button>
-      )}
+      <Box display="flex" alignItems="center" gap={1}>
+        {isOwner && onDelete && (
+          <Tooltip title="Delete Room">
+            <IconButton
+              onClick={onDelete}
+              size="small"
+              sx={{
+                color: "#EF4444",
+                border: "1px solid rgba(239,68,68,0.2)",
+                borderRadius: "8px",
+                width: 40,
+                height: 40,
+                "&:hover": {
+                  backgroundColor: "rgba(239,68,68,0.1)",
+                  borderColor: "#EF4444",
+                },
+              }}
+            >
+              <DeleteOutlineIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+
+        {onJoin && (
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={onJoin}
+            sx={{
+              minHeight: "40px",
+              px: 3,
+              fontSize: "0.85rem",
+              fontWeight: 700,
+            }}
+          >
+            Join
+          </Button>
+        )}
+      </Box>
     </Card>
   );
 };
 
 export default RoomCard;
+

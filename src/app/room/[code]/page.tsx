@@ -173,7 +173,9 @@ export default function RoomPage() {
 
   const handleStartGame = (gameType: string) => {
     setGamePickerOpen(false);
-    socketManager.emit("start_game", { gameType, rounds: 3 });
+    const gameConfig = GAMES_CONFIG[gameType as keyof typeof GAMES_CONFIG];
+    const rounds = gameConfig?.rounds || 5;
+    socketManager.emit("start_game", { gameType, totalRounds: rounds });
   };
 
   const handleSubmitAnswer = (answer: string) => {
