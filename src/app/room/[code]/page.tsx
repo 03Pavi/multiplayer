@@ -57,16 +57,14 @@ export default function RoomPage() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "error" | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const currentRoomRef = useRef(currentRoom);
+  useEffect(() => { currentRoomRef.current = currentRoom; }, [currentRoom]);
 
   // Setup connection to simulation socket
   useEffect(() => {
-    if (!currentRoom) {
-      // Create fallback if refreshed
-      if (user) {
-        socketManager.emit("create_room", { user });
-      }
-      return;
-    }
+    // Setup socket listeners ONCE
+    // Remove currentRoom check since it causes re-renders if we don't list it in deps
+    if (!user) return;
 
     // Connect socket listeners
     socketManager.on("player_joined", (player) => {
@@ -87,7 +85,7 @@ export default function RoomPage() {
     });
 
     socketManager.on("typing_status", ({ playerId, isTyping }) => {
-      const typer = currentRoom.players.find(p => p.id === playerId);
+      const typer = currentRoomRef.current?.players.find(p => p.id === playerId) || { name: "Player" };
       if (typer) {
         if (isTyping) {
           setActiveTypers(prev => [...prev.filter(n => n !== typer.name), typer.name]);
@@ -137,21 +135,21 @@ export default function RoomPage() {
     });
 
     return () => {
-      socketManager.off("player_joined", () => {});
-      socketManager.off("players_updated", () => {});
-      socketManager.off("player_left", () => {});
-      socketManager.off("new_chat", () => {});
-      socketManager.off("typing_status", () => {});
-      socketManager.off("game_started", () => {});
-      socketManager.off("round_prompt", () => {});
-      socketManager.off("timer_tick", () => {});
-      socketManager.off("round_results", () => {});
-      socketManager.off("game_ended", () => {});
-      socketManager.off("connection_error", () => {});
-      socketManager.off("connection_established", () => {});
-      socketManager.off("room_left", () => {});
+      socketManager.off("player_joined");
+      socketManager.off("players_updated");
+      socketManager.off("player_left");
+      socketManager.off("new_chat");
+      socketManager.off("typing_status");
+      socketManager.off("game_started");
+      socketManager.off("round_prompt");
+      socketManager.off("timer_tick");
+      socketManager.off("round_results");
+      socketManager.off("game_ended");
+      socketManager.off("connection_error");
+      socketManager.off("connection_established");
+      socketManager.off("room_left");
     };
-  }, [currentRoom, dispatch, user]);
+  }, [dispatch, user]); // Removed currentRoom to avoid reconnecting constantly
 
   const handleCopyLink = async () => {
     if (!currentRoom) return;

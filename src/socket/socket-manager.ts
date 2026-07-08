@@ -8,6 +8,7 @@ type SocketCallback = (...args: any[]) => void;
 class P2PManager {
   private peer: Peer | null = null;
   private connections: { [peerId: string]: DataConnection } = {}; // Host store
+  private peerToPlayerId: { [peerId: string]: string } = {}; // Maps conn.peer to Player.id
   private activeConnection: DataConnection | null = null; // Client store
   private listeners: { [event: string]: SocketCallback[] } = {};
   
@@ -41,6 +42,7 @@ class P2PManager {
     }
     Object.values(this.connections).forEach(c => c.close());
     this.connections = {};
+    this.peerToPlayerId = {};
     if (this.activeConnection) {
       this.activeConnection.close();
       this.activeConnection = null;
@@ -58,9 +60,13 @@ class P2PManager {
     this.listeners[event].push(callback);
   }
 
-  public off(event: string, callback: SocketCallback) {
+  public off(event: string, callback?: SocketCallback) {
     if (this.listeners[event]) {
-      this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
+      if (callback) {
+        this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
+      } else {
+        this.listeners[event] = [];
+      }
     }
   }
 
@@ -234,6 +240,7 @@ class P2PManager {
 
       if (event === "register_player") {
         const newPlayer: Player = { ...data, isHost: false };
+        this.peerToPlayerId[conn.peer] = newPlayer.id;
         if (this.roomState) {
           if (this.roomState.players.length >= this.roomState.maxPlayers) {
             conn.send({ event: "join_rejected", data: "Room is full" });
@@ -248,7 +255,8 @@ class P2PManager {
           this.trigger("room_joined", this.roomState);
         }
       } else if (event === "submit_answer") {
-        this.handleClientSubmitAnswer(conn.peer, data.answer);
+        const playerId = this.peerToPlayerId[conn.peer] || conn.peer;
+        this.handleClientSubmitAnswer(playerId, data.answer);
       } else {
         this.trigger(event, data);
         this.broadcastPayload(event, data);
@@ -259,7 +267,8 @@ class P2PManager {
       console.log(`[P2P Host] Player disconnected: ${conn.peer}`);
       delete this.connections[conn.peer];
       if (this.roomState) {
-        this.roomState.players = this.roomState.players.filter(p => p.id !== conn.peer);
+        const playerId = this.peerToPlayerId[conn.peer] || conn.peer;
+        this.roomState.players = this.roomState.players.filter(p => p.id !== playerId);
         dbService.updateRoomPlayers(this.roomState.code, this.roomState.players);
         this.broadcastPayload("room_updated", this.roomState);
       }
