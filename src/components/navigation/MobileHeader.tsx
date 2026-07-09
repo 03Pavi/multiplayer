@@ -1,10 +1,12 @@
 "use client";
 
 import React from "react";
-import { Box, Typography } from "@mui/material";
+import { Box, Typography, IconButton } from "@mui/material";
 import SportsEsportsIcon from "@mui/icons-material/SportsEsports";
+import LogoutIcon from "@mui/icons-material/Logout";
 import { useAppNavigation } from "@/hooks/use-app-navigation";
-import { useAppSelector } from "@/store/hooks";
+import { useAppDispatch } from "@/store/hooks";
+import { logout } from "@/store/auth-slice";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -15,7 +17,12 @@ const PAGE_TITLES: Record<string, string> = {
 
 export const MobileHeader: React.FC = () => {
   const { navigate, pathname } = useAppNavigation();
-  const user = useAppSelector((state) => state.auth.user);
+  const dispatch = useAppDispatch();
+
+  const handleLogout = () => {
+    dispatch(logout());
+    navigate("/login");
+  };
 
   const pageTitle = pathname
     ? PAGE_TITLES[pathname] ?? (pathname.startsWith("/room/") ? "Game Room" : "PartyVerse")
@@ -68,26 +75,22 @@ export const MobileHeader: React.FC = () => {
         {pageTitle}
       </Typography>
 
-      {/* Right: Avatar shortcut */}
-      <Box
-        onClick={() => navigate("/profile")}
+      {/* Right: Logout (mobile) / Avatar (desktop handled by Sidebar) */}
+      <IconButton
+        onClick={handleLogout}
+        aria-label="Log out"
         sx={{
-          fontSize: "1.4rem",
-          width: 36,
-          height: 36,
-          borderRadius: "50%",
+          display: { xs: "flex", sm: "none" },
+          color: "#EF4444",
           backgroundColor: "rgba(255,255,255,0.06)",
           border: "1px solid rgba(255,255,255,0.1)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          transition: "all 0.2s",
-          "&:hover": { backgroundColor: "rgba(34,197,94,0.12)", borderColor: "#22C55E" },
+          width: 36,
+          height: 36,
+          "&:hover": { backgroundColor: "rgba(239,68,68,0.12)", borderColor: "#EF4444" },
         }}
       >
-        {user?.avatar ?? "🎮"}
-      </Box>
+        <LogoutIcon sx={{ fontSize: 20 }} />
+      </IconButton>
     </Box>
   );
 };

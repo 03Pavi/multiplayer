@@ -1,105 +1,106 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Box, Container, Typography, Stack, TextField, InputAdornment, Chip, Tooltip } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import GroupAddIcon from "@mui/icons-material/GroupAdd";
-import HistoryIcon from "@mui/icons-material/History";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import WifiIcon from "@mui/icons-material/Wifi";
 import { Button, Card, GameCard, RoomCard, Avatar, Dialog } from "@/components/ui";
 import { useAppNavigation } from "@/hooks/use-app-navigation";
-import { useAppSelector, useAppDispatch } from "@/store/hooks";
-import { setRoom } from "@/store/room-slice";
+import { useAppSelector, useAppDispatch, useAnyActionPending, useActionPending } from "@/store/hooks";
 import { GAMES_CONFIG } from "@/features/games/config";
-import socketManager from "@/socket/socket-manager";
-import { dbService } from "@/services/db-service";
+import { createRoom, joinRoom, deleteRoom, fetchPublicRooms } from "@/store/thunks/room-thunks";
+import { fetchRecentArenas, fetchOnlinePlayers, setPresence, clearPresence } from "@/store/thunks/dashboard-thunks";
 import { Room } from "@/types";
 
 export default function DashboardPage() {
   const { navigate } = useAppNavigation();
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
+
+  const feedsLoading = useAnyActionPending(
+    fetchPublicRooms.typePrefix,
+    fetchRecentArenas.typePrefix,
+    fetchOnlinePlayers.typePrefix
+  );
+  const creating = useActionPending(createRoom.typePrefix);
+  const joining = useActionPending(joinRoom.typePrefix);
   
   const [roomCodeInput, setRoomCodeInput] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(6);
   
-  // Real-time Database Feeds
+  // REST-fetched feeds (manual refresh, no realtime subscriptions)
   const [publicRooms, setPublicRooms] = useState<Room[]>([]);
   const [recentArenas, setRecentArenas] = useState<any[]>([]);
   const [onlinePlayers, setOnlinePlayers] = useState<any[]>([]);
 
-  useEffect(() => {
-    // 1. Subscribe to public rooms feed
-    const unsubscribeRooms = dbService.subscribeToPublicRooms((rooms) => {
+  const refreshFeeds = useCallback(async () => {
+    try {
+      const [rooms, arenas, players] = await Promise.all([
+        dispatch(fetchPublicRooms()).unwrap(),
+        dispatch(fetchRecentArenas()).unwrap(),
+        dispatch(fetchOnlinePlayers()).unwrap(),
+      ]);
       setPublicRooms(rooms);
-    });
-
-    // 2. Subscribe to recent arenas feed
-    const unsubscribeArenas = dbService.subscribeToRecentArenas((arenas) => {
       setRecentArenas(arenas);
-    });
-
-    // 3. Subscribe to online players presence feed
-    const unsubscribePresence = dbService.subscribeToOnlinePlayers((players) => {
       setOnlinePlayers(players);
-    });
+    } catch (err) {
+      console.error("[Dashboard] Failed to refresh feeds:", err);
+    }
+  }, [dispatch]);
 
-    // 4. Register current user as online
+  useEffect(() => {
+    // Register presence, then load feeds once on mount.
     if (user) {
-      dbService.setPresence({
-        id: user.id,
-        name: user.name,
-        avatar: user.avatar,
-        level: user.level || 1,
-        rank: user.rank || "Bronze",
-      });
+      dispatch(
+        setPresence({
+          id: user.id,
+          name: user.name,
+          avatar: user.avatar,
+          level: user.level || 1,
+          rank: user.rank || "Bronze",
+        })
+      );
     }
 
-    // 5. Listen for socket connections
-    socketManager.on("room_created", async (room) => {
-      dispatch(setRoom(room));
-      navigate(`/room/${room.code}`);
-    });
-
-    socketManager.on("room_joined", (room) => {
-      dispatch(setRoom(room));
-      navigate(`/room/${room.code}`);
-    });
-
-    socketManager.on("connection_error", (err: { message: string }) => {
-      alert(err.message || "Failed to connect to the room. The host may be offline.");
-    });
+    refreshFeeds();
 
     return () => {
-      unsubscribeRooms();
-      unsubscribeArenas();
-      unsubscribePresence();
-      if (user) dbService.clearPresence(user.id);
-      socketManager.off("room_created");
-      socketManager.off("room_joined");
-      socketManager.off("connection_error");
+      if (user) dispatch(clearPresence(user.id));
     };
-  }, [dispatch, navigate, user]);
+  }, [dispatch, user, refreshFeeds]);
 
-  const handleCreateRoomSubmit = () => {
+  const handleCreateRoomSubmit = async () => {
     if (!user) return;
-    socketManager.emit("create_room", {
-      user,
-      roomName: newRoomName || `${user.name}'s Arena`,
-      maxPlayers,
-      isPrivate: false,
-    });
-    setCreateDialogOpen(false);
+    try {
+      const room = await dispatch(
+        createRoom({
+          user,
+          roomName: newRoomName || `${user.name}'s Arena`,
+          maxPlayers,
+          isPrivate: false,
+        })
+      ).unwrap();
+      setCreateDialogOpen(false);
+      navigate(`/room/${room.code}`);
+    } catch (err: any) {
+      alert(err?.message || "Failed to create room.");
+    }
   };
 
-  const handleJoinRoom = () => {
+  const handleJoinRoom = async () => {
     if (!roomCodeInput || !user) return;
-    socketManager.emit("join_room", {
-      roomCode: roomCodeInput.toUpperCase(),
-      user,
-    });
+    try {
+      const room = await dispatch(
+        joinRoom({ code: roomCodeInput.toUpperCase(), user })
+      ).unwrap();
+      navigate(`/room/${room.code}`);
+    } catch (err: any) {
+      alert(err?.message || "Failed to join the room. Check the code and try again.");
+    }
   };
   const allGames = Object.values(GAMES_CONFIG);
   const [showAllGames, setShowAllGames] = useState(false);
@@ -125,15 +126,27 @@ export default function DashboardPage() {
             </Typography>
           </Box>
 
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<AddIcon />}
-            onClick={() => setCreateDialogOpen(true)}
-            sx={{ width: { xs: "100%", sm: "auto" } }}
-          >
-            Create Room
-          </Button>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ width: { xs: "100%", sm: "auto" } }}>
+            <Button
+              variant="outlined"
+              color="secondary"
+              startIcon={<RefreshIcon />}
+              onClick={refreshFeeds}
+              loading={feedsLoading}
+              sx={{ width: { xs: "100%", sm: "auto" } }}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<AddIcon />}
+              onClick={() => setCreateDialogOpen(true)}
+              sx={{ width: { xs: "100%", sm: "auto" } }}
+            >
+              Create Room
+            </Button>
+          </Stack>
         </Box>
 
         <Box sx={{ display: "flex", flexDirection: { xs: "column", lg: "row" }, gap: 4 }}>
@@ -172,6 +185,7 @@ export default function DashboardPage() {
                   variant="contained"
                   color="secondary"
                   disabled={!roomCodeInput}
+                  loading={joining}
                   onClick={handleJoinRoom}
                   sx={{ px: 4, width: { xs: "100%", sm: "auto" } }}
                 >
@@ -203,12 +217,21 @@ export default function DashboardPage() {
                       isOwner={user ? room.hostId === user.id : false}
                       onDelete={async () => {
                         if (confirm(`Delete room "${room.name}" (${room.code})?`)) {
-                          await dbService.deleteRoom(room.code);
+                          try {
+                            await dispatch(deleteRoom(room.code)).unwrap();
+                            await refreshFeeds();
+                          } catch (err: any) {
+                            alert(err?.message || "Failed to delete room.");
+                          }
                         }
                       }}
-                      onJoin={() => {
-                        if (user) {
-                          socketManager.emit("join_room", { roomCode: room.code, user });
+                      onJoin={async () => {
+                        if (!user) return;
+                        try {
+                          const joined = await dispatch(joinRoom({ code: room.code, user })).unwrap();
+                          navigate(`/room/${joined.code}`);
+                        } catch (err: any) {
+                          alert(err?.message || "Failed to join room.");
                         }
                       }}
                     />
@@ -504,7 +527,7 @@ export default function DashboardPage() {
             <Button variant="outlined" color="secondary" onClick={() => setCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button variant="contained" color="primary" onClick={handleCreateRoomSubmit}>
+            <Button variant="contained" color="primary" onClick={handleCreateRoomSubmit} loading={creating}>
               Host Room
             </Button>
           </>

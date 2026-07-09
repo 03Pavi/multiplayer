@@ -1,37 +1,35 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
-import { Box, Typography, Stack, TextField, IconButton, Paper, Divider, Chip, Container, Snackbar, Alert } from "@mui/material";
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
+import { Box, Typography, Stack, TextField, IconButton, Paper, Chip, Container, Snackbar, Alert } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import SkipNextIcon from "@mui/icons-material/SkipNext";
 import SportsEsportsIcon from "@mui/icons-material/SportsEsports";
 import LogoutIcon from "@mui/icons-material/Logout";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import { useAppSelector, useAppDispatch } from "@/store/hooks";
+import { useAppSelector, useAppDispatch, useActionPending } from "@/store/hooks";
 import { useAppNavigation } from "@/hooks/use-app-navigation";
+import { clearRoom } from "@/store/room-slice";
+import { resetGame } from "@/store/game-slice";
 import {
-  setRoom,
-  updatePlayers,
-  playerJoined,
-  playerLeft,
-  addMessage,
-  clearRoom,
-} from "@/store/room-slice";
+  fetchRoom,
+  sendMessage,
+  toggleReady,
+  leaveRoom,
+} from "@/store/thunks/room-thunks";
 import {
   startGame,
-  setRoundPrompt,
-  tickTimer,
-  setRoundResults,
-  endGame,
-  resetGame,
-  nextRound,
-  setTimer,
-} from "@/store/game-slice";
+  submitAnswer,
+  advanceRound,
+  returnToLobby,
+} from "@/store/thunks/game-thunks";
 
 import { Button, Card, PlayerCard, GameHeader, Dialog } from "@/components/ui";
 import { copyToClipboard } from "@/utils/clipboard";
-import socketManager from "@/socket/socket-manager";
 import { GAMES_CONFIG } from "@/features/games/config";
 
 // Game UIs
@@ -44,112 +42,47 @@ import WouldYouRatherUI from "@/features/games/WouldYouRather/ui";
 import NeverHaveIEverUI from "@/features/games/NeverHaveIEver/ui";
 
 export default function RoomPage() {
-  const { navigate, searchParams } = useAppNavigation();
+  const { navigate } = useAppNavigation();
+  const params = useParams<{ code: string }>();
+  const code = (params?.code || "").toString().toUpperCase();
   const dispatch = useAppDispatch();
-  
+
   const user = useAppSelector((state) => state.auth.user);
   const { currentRoom, messages } = useAppSelector((state) => state.room);
   const gameState = useAppSelector((state) => state.game);
-  
+
   const [chatInput, setChatInput] = useState("");
   const [gamePickerOpen, setGamePickerOpen] = useState(false);
-  const [activeTypers, setActiveTypers] = useState<string[]>([]);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "error" | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const currentRoomRef = useRef(currentRoom);
-  useEffect(() => { currentRoomRef.current = currentRoom; }, [currentRoom]);
 
-  // Setup connection to simulation socket
+  // Per-action loading indicators.
+  const refreshing = useActionPending(fetchRoom.typePrefix);
+  const sending = useActionPending(sendMessage.typePrefix);
+  const readying = useActionPending(toggleReady.typePrefix);
+  const starting = useActionPending(startGame.typePrefix);
+  const advancing = useActionPending(advanceRound.typePrefix);
+  const returning = useActionPending(returnToLobby.typePrefix);
+  const leaving = useActionPending(leaveRoom.typePrefix);
+
+  // Manual refresh: pull the latest room + messages + game state from the API.
+  const refresh = useCallback(async () => {
+    if (!code) return;
+    try {
+      await dispatch(fetchRoom(code)).unwrap();
+    } catch (err: any) {
+      setError(err?.message || "This room no longer exists.");
+    }
+  }, [dispatch, code]);
+
+  // Load room state once on mount (no realtime subscriptions).
   useEffect(() => {
-    // Setup socket listeners ONCE
-    // Remove currentRoom check since it causes re-renders if we don't list it in deps
-    if (!user) return;
+    refresh();
+  }, [refresh]);
 
-    // Connect socket listeners
-    socketManager.on("player_joined", (player) => {
-      dispatch(playerJoined(player));
-    });
-
-    socketManager.on("players_updated", (players) => {
-      dispatch(updatePlayers(players));
-    });
-
-    socketManager.on("player_left", (playerId) => {
-      dispatch(playerLeft(playerId));
-    });
-
-    socketManager.on("new_chat", (msg) => {
-      dispatch(addMessage(msg));
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    });
-
-    socketManager.on("typing_status", ({ playerId, isTyping }) => {
-      const typer = currentRoomRef.current?.players.find(p => p.id === playerId) || { name: "Player" };
-      if (typer) {
-        if (isTyping) {
-          setActiveTypers(prev => [...prev.filter(n => n !== typer.name), typer.name]);
-        } else {
-          setActiveTypers(prev => prev.filter(n => n !== typer.name));
-        }
-      }
-    });
-
-    socketManager.on("game_started", ({ gameType, totalRounds }) => {
-      dispatch(startGame({ gameType, totalRounds }));
-    });
-
-    socketManager.on("round_prompt", ({ prompt, options, timer, currentRound }) => {
-      dispatch(setRoundPrompt({ prompt, options, timer, currentRound }));
-    });
-
-    socketManager.on("timer_tick", (timeRemaining) => {
-      if (timeRemaining && typeof timeRemaining.timer === "number") {
-        dispatch(setTimer(timeRemaining.timer));
-      }
-    });
-
-    socketManager.on("round_results", ({ winnerId, answers }) => {
-      dispatch(setRoundResults({ gameData: { winnerId, answers }, timer: 5 }));
-    });
-
-    socketManager.on("game_ended", ({ podium }) => {
-      dispatch(endGame());
-      // Custom podium set
-    });
-
-    socketManager.on("connection_error", ({ message }: { message: string }) => {
-      console.error("[Room] Connection error:", message);
-      setConnectionError(message);
-      setConnectionStatus("error");
-    });
-
-    socketManager.on("connection_established", () => {
-      setConnectionStatus("connected");
-      setConnectionError(null);
-    });
-
-    socketManager.on("room_left", ({ reason }: { reason: string }) => {
-      setConnectionError(reason || "You have left the room.");
-      navigate("/dashboard");
-    });
-
-    return () => {
-      socketManager.off("player_joined");
-      socketManager.off("players_updated");
-      socketManager.off("player_left");
-      socketManager.off("new_chat");
-      socketManager.off("typing_status");
-      socketManager.off("game_started");
-      socketManager.off("round_prompt");
-      socketManager.off("timer_tick");
-      socketManager.off("round_results");
-      socketManager.off("game_ended");
-      socketManager.off("connection_error");
-      socketManager.off("connection_established");
-      socketManager.off("room_left");
-    };
-  }, [dispatch, user]); // Removed currentRoom to avoid reconnecting constantly
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
   const handleCopyLink = async () => {
     if (!currentRoom) return;
@@ -158,57 +91,104 @@ export default function RoomPage() {
     if (ok) alert("Room link copied to clipboard!");
   };
 
-  const handleSendChat = (e: React.FormEvent) => {
+  const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
-    socketManager.emit("send_chat", { content: chatInput });
+    if (!chatInput.trim() || !user || !currentRoom) return;
+    const content = chatInput;
     setChatInput("");
+    try {
+      await dispatch(
+        sendMessage({
+          code: currentRoom.code,
+          sender: { id: user.id, name: user.name, avatar: user.avatar },
+          content,
+        })
+      ).unwrap();
+    } catch (err: any) {
+      setError(err?.message || "Failed to send message.");
+    }
   };
 
   const handleToggleReady = () => {
-    socketManager.emit("toggle_ready", {});
+    if (!user || !currentRoom) return;
+    dispatch(toggleReady({ code: currentRoom.code, userId: user.id }));
   };
 
   const handleStartGame = (gameType: string) => {
     setGamePickerOpen(false);
+    if (!currentRoom) return;
     const gameConfig = GAMES_CONFIG[gameType as keyof typeof GAMES_CONFIG];
     const rounds = gameConfig?.rounds || 5;
-    socketManager.emit("start_game", { gameType, totalRounds: rounds });
+    dispatch(startGame({ code: currentRoom.code, gameType: gameType as any, totalRounds: rounds }));
   };
 
   const handleSubmitAnswer = (answer: string) => {
-    socketManager.emit("submit_answer", { answer });
+    if (!user || !currentRoom) return;
+    dispatch(submitAnswer({ code: currentRoom.code, playerId: user.id, answer }));
+  };
+
+  const handleAdvance = () => {
+    if (!currentRoom) return;
+    dispatch(advanceRound({ code: currentRoom.code }));
+  };
+
+  const handleReturnLobby = () => {
+    if (!currentRoom) return;
+    dispatch(returnToLobby({ code: currentRoom.code }));
+  };
+
+  const handleLeave = async () => {
+    if (user && currentRoom) {
+      await dispatch(leaveRoom({ code: currentRoom.code, userId: user.id }));
+    }
+    dispatch(clearRoom());
+    dispatch(resetGame());
+    navigate("/dashboard");
   };
 
   const isUserHost = currentRoom?.hostId === user?.id;
-  const everyoneReady = currentRoom?.players.every(p => p.isReady) ?? false;
+  const everyoneReady = currentRoom?.players.filter((p) => !p.isHost).every((p) => p.isReady) ?? false;
 
   // Render correct gameplay panel based on GameType
   const renderGameContent = () => {
     switch (gameState.gameType) {
       case "TruthOrDare":
-        return <TruthOrDareUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <TruthOrDareUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       case "Quiz":
-        return <QuizUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <QuizUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       case "StoryBuilder":
-        return <StoryBuilderUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <StoryBuilderUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       case "Drawing":
-        return <DrawingUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <DrawingUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       case "Reaction":
-        return <ReactionUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <ReactionUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       case "WouldYouRather":
-        return <WouldYouRatherUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <WouldYouRatherUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       case "NeverHaveIEver":
-        return <NeverHaveIEverUI gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
+        return <NeverHaveIEverUI key={`${gameState.gameType}-${gameState.currentRound}`} gameState={gameState} onSubmitAnswer={handleSubmitAnswer} />;
       default:
         return <Typography variant="h6">Loading Game Engine...</Typography>;
     }
   };
 
+  const errorSnackbar = (
+    <Snackbar open={!!error} autoHideDuration={5000} onClose={() => setError(null)} anchorOrigin={{ vertical: "top", horizontal: "center" }}>
+      <Alert severity="error" onClose={() => setError(null)} variant="filled">
+        {error}
+      </Alert>
+    </Snackbar>
+  );
+
   if (!currentRoom) {
     return (
       <Box sx={{ p: 4, textAlign: "center", color: "#9CA3AF" }}>
         Loading room parameters...
+        <Box mt={2}>
+          <Button variant="outlined" color="secondary" startIcon={<RefreshIcon />} onClick={refresh} loading={refreshing}>
+            Refresh
+          </Button>
+        </Box>
+        {errorSnackbar}
       </Box>
     );
   }
@@ -222,26 +202,32 @@ export default function RoomPage() {
           currentRound={gameState.currentRound}
           totalRounds={gameState.totalRounds}
           timerSeconds={gameState.timer}
-          onExit={() => {
-            socketManager.emit("leave_room", {});
-            dispatch(clearRoom());
-            dispatch(resetGame());
-            navigate("/dashboard");
-          }}
+          onExit={handleLeave}
         />
 
         <Container maxWidth="md" sx={{ py: 4 }}>
+          <Stack direction="row" justifyContent="center" spacing={2} mb={3}>
+            <Button variant="outlined" color="secondary" startIcon={<RefreshIcon />} onClick={refresh} loading={refreshing}>
+              Refresh
+            </Button>
+            {isUserHost && (
+              <Button variant="contained" color="primary" startIcon={<SkipNextIcon />} onClick={handleAdvance} loading={advancing}>
+                {gameState.status === "round_results" ? "Next Round" : "Reveal Results"}
+              </Button>
+            )}
+          </Stack>
+
           {gameState.status === "round_results" ? (
             <Card sx={{ p: 4, textAlign: "center" }}>
               <Typography variant="h4" color="#F59E0B" fontWeight={950} mb={3}>
                 ROUND ENDED
               </Typography>
               <Typography variant="body1" mb={4}>
-                Reviewing scores. Next round starting in {gameState.timer}s...
+                {isUserHost ? "Press Next Round to continue." : "Waiting for the host to continue..."}
               </Typography>
               <Stack spacing={2} sx={{ maxWidth: "400px", mx: "auto" }}>
                 {gameState.gameData?.answers?.map((ans: any, idx: number) => {
-                  const player = currentRoom.players.find(p => p.id === ans.playerId);
+                  const player = currentRoom.players.find((p) => p.id === ans.playerId);
                   return (
                     <Box key={idx} display="flex" justifyContent="space-between" p={1.5} bgcolor="rgba(255,255,255,0.02)" borderRadius="8px">
                       <Typography variant="subtitle2" fontWeight={800}>{player?.name || "Player"}</Typography>
@@ -255,6 +241,7 @@ export default function RoomPage() {
             renderGameContent()
           )}
         </Container>
+        {errorSnackbar}
       </Box>
     );
   }
@@ -271,20 +258,12 @@ export default function RoomPage() {
           <Typography variant="body2" sx={{ color: "#9CA3AF", mb: 4 }}>
             The match has concluded. Return to lobby.
           </Typography>
-          
-          <Button
-            variant="contained"
-            color="primary"
-            fullWidth
-            onClick={() => {
-              dispatch(resetGame());
-              currentRoom.status = "lobby";
-              dispatch(setRoom({ ...currentRoom, status: "lobby" }));
-            }}
-          >
+
+          <Button variant="contained" color="primary" fullWidth onClick={handleReturnLobby} loading={returning}>
             Back to Lobby
           </Button>
         </Card>
+        {errorSnackbar}
       </Box>
     );
   }
@@ -305,40 +284,35 @@ export default function RoomPage() {
           </Box>
 
           <Stack direction="row" spacing={1.5}>
+            <IconButton onClick={refresh} sx={{ color: "#22C55E", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <RefreshIcon />
+            </IconButton>
             <IconButton onClick={handleCopyLink} sx={{ color: "#3B82F6", border: "1px solid rgba(255,255,255,0.08)" }}>
               <ContentCopyIcon />
             </IconButton>
             <Button
               variant="outlined"
               color="error"
-              onClick={() => {
-                socketManager.emit("leave_room", {});
-                dispatch(clearRoom());
-                navigate("/dashboard");
-              }}
+              onClick={handleLeave}
+              loading={leaving}
               sx={{ display: { xs: "none", sm: "inline-flex" } }}
             >
               Exit
             </Button>
             <IconButton
               color="error"
-              onClick={() => {
-                socketManager.emit("leave_room", {});
-                dispatch(clearRoom());
-                navigate("/dashboard");
-              }}
+              onClick={handleLeave}
               sx={{
                 display: { xs: "inline-flex", sm: "none" },
                 border: "1px solid rgba(239, 68, 68, 0.2)",
                 borderRadius: "8px",
-                p: 1.2
+                p: 1.2,
               }}
             >
               <LogoutIcon />
             </IconButton>
           </Stack>
         </Box>
-
 
         {/* Players Roster Grid */}
         <Typography variant="subtitle1" fontWeight={800} mb={3}>
@@ -371,6 +345,7 @@ export default function RoomPage() {
                 startIcon={<PlayArrowIcon />}
                 onClick={() => setGamePickerOpen(true)}
                 disabled={!everyoneReady && currentRoom.players.length > 1}
+                loading={starting}
                 fullWidth
               >
                 Launch Game Engine
@@ -378,13 +353,14 @@ export default function RoomPage() {
             </Stack>
           ) : (
             <Button
-              variant={user && currentRoom.players.find(p => p.id === user.id)?.isReady ? "outlined" : "contained"}
+              variant={user && currentRoom.players.find((p) => p.id === user.id)?.isReady ? "outlined" : "contained"}
               color="secondary"
               startIcon={<CheckCircleIcon />}
               onClick={handleToggleReady}
+              loading={readying}
               fullWidth
             >
-              {user && currentRoom.players.find(p => p.id === user.id)?.isReady ? "Cancel Ready" : "Toggle Ready Status"}
+              {user && currentRoom.players.find((p) => p.id === user.id)?.isReady ? "Cancel Ready" : "Toggle Ready Status"}
             </Button>
           )}
         </Box>
@@ -402,10 +378,13 @@ export default function RoomPage() {
           position: "relative",
         }}
       >
-        <Box sx={{ p: 2.5, borderBottom: "1px solid rgba(255, 255, 255, 0.08)" }}>
+        <Box sx={{ p: 2.5, borderBottom: "1px solid rgba(255, 255, 255, 0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Typography variant="subtitle2" fontWeight={800}>
             ROOM CHAT LOBBY
           </Typography>
+          <IconButton size="small" onClick={refresh} sx={{ color: "#22C55E" }}>
+            <RefreshIcon sx={{ fontSize: 18 }} />
+          </IconButton>
         </Box>
 
         {/* Messages list */}
@@ -432,15 +411,6 @@ export default function RoomPage() {
           <div ref={chatEndRef} />
         </Box>
 
-        {/* Typer status */}
-        {activeTypers.length > 0 && (
-          <Box sx={{ px: 2, py: 0.5 }}>
-            <Typography variant="caption" sx={{ color: "#22C55E", fontStyle: "italic" }}>
-              {activeTypers.join(", ")} is typing...
-            </Typography>
-          </Box>
-        )}
-
         {/* Form input */}
         <Box component="form" onSubmit={handleSendChat} sx={{ p: 2, borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
           <TextField
@@ -451,7 +421,7 @@ export default function RoomPage() {
             onChange={(e) => setChatInput(e.target.value)}
             InputProps={{
               endAdornment: (
-                <IconButton type="submit" sx={{ color: "#22C55E" }}>
+                <IconButton type="submit" disabled={sending} sx={{ color: "#22C55E" }}>
                   <SendIcon sx={{ fontSize: 18 }} />
                 </IconButton>
               ),
@@ -499,6 +469,7 @@ export default function RoomPage() {
           ))}
         </Box>
       </Dialog>
+      {errorSnackbar}
     </Box>
   );
 }

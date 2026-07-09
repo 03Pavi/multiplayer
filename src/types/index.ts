@@ -25,6 +25,34 @@ export interface Room {
   gameType?: GameType;
   status: RoomStatus;
   createdAt: string;
+  game?: ServerGame;
+}
+
+/**
+ * Authoritative game state persisted on the server (via REST API + Firebase).
+ * Replaces the previous in-memory P2P/socket game loop. Each client reads this
+ * via GET and mutates it through POST actions (manual refresh, no realtime).
+ */
+export interface RoundAnswer {
+  playerId: string;
+  answer: string;
+  isCorrect?: boolean;
+  points?: number;
+  ms?: number;
+}
+
+export interface ServerGame {
+  gameType: GameType;
+  currentRound: number;
+  totalRounds: number;
+  phase: "action" | "results" | "ended";
+  prompt: string;
+  options?: string[];
+  timer: number;
+  correctAnswer?: string;
+  submissions?: Record<string, string>;
+  results?: { winnerId: string; answers: RoundAnswer[] } | null;
+  podium?: { id: string; name: string; score: number; avatar: string }[];
 }
 
 export type RoomStatus = "lobby" | "playing" | "ended";

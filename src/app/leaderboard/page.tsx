@@ -1,37 +1,44 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Box, Container, Typography, TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Paper, Tabs, Tab } from "@mui/material";
+import React, { useState, useEffect, useCallback } from "react";
+import { Box, Container, Typography, TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Paper, Tabs, Tab, CircularProgress } from "@mui/material";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import { Card, Avatar } from "@/components/ui";
-import { dbService } from "@/services/db-service";
-import { useAppSelector } from "@/store/hooks";
+import { useAppSelector, useAppDispatch, useActionPending } from "@/store/hooks";
+import { fetchLeaderboard, updateLeaderboardXP } from "@/store/thunks/leaderboard-thunks";
 
 export default function LeaderboardPage() {
   const [tabIndex, setTabIndex] = useState(0);
   const [rankings, setRankings] = useState<any[]>([]);
   const user = useAppSelector((state) => state.auth.user);
+  const dispatch = useAppDispatch();
+  const loading = useActionPending(fetchLeaderboard.typePrefix);
+
+  const load = useCallback(async () => {
+    try {
+      // Sync current user into the leaderboard, then fetch the ranked list.
+      if (user) {
+        await dispatch(
+          updateLeaderboardXP({
+            id: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            xp: user.xp,
+            level: user.level,
+            rank: user.rank,
+          })
+        ).unwrap();
+      }
+      const list = await dispatch(fetchLeaderboard()).unwrap();
+      setRankings(list);
+    } catch (err) {
+      console.error("[Leaderboard] Failed to load:", err);
+    }
+  }, [dispatch, user]);
 
   useEffect(() => {
-    // 1. Sync current user to leaderboard db if logged in
-    if (user) {
-      dbService.updateLeaderboardXP({
-        id: user.id,
-        name: user.name,
-        avatar: user.avatar,
-        xp: user.xp,
-        level: user.level,
-        rank: user.rank,
-      });
-    }
-
-    // 2. Subscribe to leaderboard realtime changes
-    const unsubscribe = dbService.subscribeToLeaderboard((list) => {
-      setRankings(list);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
+    load();
+  }, [load]);
 
   const getPodiumColor = (rank: number) => {
     switch (rank) {
@@ -167,7 +174,14 @@ export default function LeaderboardPage() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ color: "#9CA3AF", py: 4 }}>
-                    No other runners-up. Level up to claim your spot!
+                    {loading ? (
+                      <Box display="flex" alignItems="center" justifyContent="center" gap={1.5}>
+                        <CircularProgress size={18} sx={{ color: "#22C55E" }} />
+                        Loading rankings...
+                      </Box>
+                    ) : (
+                      "No other runners-up. Level up to claim your spot!"
+                    )}
                   </TableCell>
                 </TableRow>
               )}

@@ -1,5 +1,19 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { Room, Player, Message } from "@/types";
+import {
+  createRoom,
+  joinRoom,
+  toggleReady,
+  fetchRoom,
+  fetchMessages,
+  sendMessage,
+} from "@/store/thunks/room-thunks";
+import {
+  startGame,
+  submitAnswer,
+  advanceRound,
+  returnToLobby,
+} from "@/store/thunks/game-thunks";
 
 export interface RoomState {
   currentRoom: Room | null;
@@ -27,47 +41,43 @@ const roomSlice = createSlice({
         state.currentRoom.players = action.payload;
       }
     },
-    playerJoined: (state, action: PayloadAction<Player>) => {
-      if (state.currentRoom) {
-        const index = state.currentRoom.players.findIndex(p => p.id === action.payload.id);
-        if (index === -1) {
-          state.currentRoom.players.push(action.payload);
-        } else {
-          state.currentRoom.players[index] = action.payload;
-        }
-      }
-    },
-    playerLeft: (state, action: PayloadAction<string>) => {
-      if (state.currentRoom) {
-        state.currentRoom.players = state.currentRoom.players.filter(p => p.id !== action.payload);
-      }
-    },
-    updatePlayerStatus: (state, action: PayloadAction<{ id: string; status: Partial<Player> }>) => {
-      if (state.currentRoom) {
-        const player = state.currentRoom.players.find(p => p.id === action.payload.id);
-        if (player) {
-          Object.assign(player, action.payload.status);
-        }
-      }
-    },
     addMessage: (state, action: PayloadAction<Message>) => {
       state.messages.push(action.payload);
+    },
+    setMessages: (state, action: PayloadAction<Message[]>) => {
+      state.messages = action.payload;
     },
     clearRoom: (state) => {
       state.currentRoom = null;
       state.messages = [];
     },
   },
+  extraReducers: (builder) => {
+    const setCurrentRoom = (state: RoomState, action: PayloadAction<Room>) => {
+      state.currentRoom = action.payload;
+    };
+
+    builder
+      .addCase(createRoom.fulfilled, setCurrentRoom)
+      .addCase(joinRoom.fulfilled, setCurrentRoom)
+      .addCase(toggleReady.fulfilled, setCurrentRoom)
+      .addCase(startGame.fulfilled, setCurrentRoom)
+      .addCase(submitAnswer.fulfilled, setCurrentRoom)
+      .addCase(advanceRound.fulfilled, setCurrentRoom)
+      .addCase(returnToLobby.fulfilled, setCurrentRoom)
+      .addCase(fetchRoom.fulfilled, (state, action) => {
+        state.currentRoom = action.payload.room;
+        state.messages = action.payload.messages;
+      })
+      .addCase(fetchMessages.fulfilled, (state, action) => {
+        state.messages = action.payload;
+      })
+      .addCase(sendMessage.fulfilled, (state, action) => {
+        state.messages.push(action.payload);
+      });
+  },
 });
 
-export const {
-  setRoom,
-  updatePlayers,
-  playerJoined,
-  playerLeft,
-  updatePlayerStatus,
-  addMessage,
-  clearRoom,
-} = roomSlice.actions;
+export const { setRoom, updatePlayers, addMessage, setMessages, clearRoom } = roomSlice.actions;
 
 export default roomSlice.reducer;

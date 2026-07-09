@@ -5,6 +5,7 @@ import authReducer from "./auth-slice";
 import roomReducer from "./room-slice";
 import gameReducer from "./game-slice";
 import settingsReducer from "./settings-slice";
+import statusReducer from "./status-slice";
 
 const createNoopStorage = () => ({
   getItem(_key: string) {
@@ -34,6 +35,7 @@ const rootReducer = combineReducers({
   room: roomReducer,
   game: gameReducer,
   settings: settingsReducer,
+  status: statusReducer,
 });
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
