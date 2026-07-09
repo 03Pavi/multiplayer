@@ -60,7 +60,6 @@ export default function DashboardPage() {
     // 5. Listen for socket connections
     socketManager.on("room_created", async (room) => {
       dispatch(setRoom(room));
-      await dbService.createRoom(room);
       navigate(`/room/${room.code}`);
     });
 
@@ -78,9 +77,9 @@ export default function DashboardPage() {
       unsubscribeArenas();
       unsubscribePresence();
       if (user) dbService.clearPresence(user.id);
-      socketManager.off("room_created", () => {});
-      socketManager.off("room_joined", () => {});
-      socketManager.off("connection_error", () => {});
+      socketManager.off("room_created");
+      socketManager.off("room_joined");
+      socketManager.off("connection_error");
     };
   }, [dispatch, navigate, user]);
 
